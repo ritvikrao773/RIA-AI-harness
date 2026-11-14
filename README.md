@@ -3,7 +3,7 @@
 
 # Ria — token-lean AI coding agent (open source)
 
-A token-lean, fast AI coding harness in the style of Claude Code / Amp / OpenCode.
+A token-lean, fast AI coding harness in the style of Claude Code / OMP / OpenCode.
 Zero runtime dependencies — a single bundled file, or a standalone `ria.exe`.
 
 **Bring your own key.** Ria ships with no API key and no default provider
