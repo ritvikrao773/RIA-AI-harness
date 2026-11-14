@@ -1,3 +1,4 @@
+installer/Version.cs
 node_modules/
 dist/
 release/
