@@ -1,3 +1,5 @@
+![Uploading 0217945865392069f6cd41e8514911883ec9f138006f90f876e68.png…]()
+
 # Ria — token-lean AI coding agent (open source)
 
 A token-lean, fast AI coding harness in the style of Claude Code / Amp / OpenCode.
