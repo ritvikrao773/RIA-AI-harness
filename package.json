@@ -1,0 +1,25 @@
+{
+  "name": "ria-agent",
+  "version": "0.1.1",
+  "description": "Token-lean open-source AI coding agent (Claude Code / OpenCode style) with bring-your-own-key providers",
+  "type": "module",
+  "bin": {
+    "ria": "dist/cli.cjs"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node dist/cli.cjs",
+    "build:exe": "node build.mjs && powershell -ExecutionPolicy Bypass -File build-exe.ps1",
+    "test": "node test/run.mjs test/tools.test.ts test/tty.test.ts test/sessions.test.ts test/compact.test.ts test/output.test.ts test/cap.test.ts test/config.test.ts test/models.test.ts test/diff.test.ts test/huge.test.ts test/runaway.test.ts test/trace.compact.ts",
+    "test:e2e": "node build.mjs && node -e \"require('esbuild').buildSync({entryPoints:['scripts/tty-run.cjs'],bundle:false,platform:'node',format:'cjs',outfile:'dist/tty-run.cjs'})\" && node test/repl.e2e.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}
