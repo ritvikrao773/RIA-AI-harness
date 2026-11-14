@@ -1,4 +1,5 @@
-https://github.com/ritvikrao773/RIA-AI-harness/blob/main/assets/ria-icon-256.png
+<img width="2048" height="2048" alt="0217945865392069f6cd41e8514911883ec9f138006f90f876e68" src="https://github.com/user-attachments/assets/b0aac5ee-4dd4-4d1f-b88e-ddc2fcdb82f8" />
+
 
 # Ria — token-lean AI coding agent (open source)
 
@@ -10,6 +11,7 @@ account: you pick a provider (deepseek, qwen, glm, gpt, claude, gemini, …),
 paste *your* key, and it stays in `~/.ria/config.json` on your machine (chmod
 600). Nothing is sent anywhere except the provider you chose.
 
+<img width="1163" height="367" alt="Screenshot 2026-11-13 212458" src="https://github.com/user-attachments/assets/e3fee495-c702-428f-9845-f92db490d8f7" />
 
 
 ## Why it's cheap on tokens
