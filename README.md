@@ -1,4 +1,4 @@
-<img width="2048" height="2048" alt="0217945865392069f6cd41e8514911883ec9f138006f90f876e68" src="https://github.com/user-attachments/assets/b0aac5ee-4dd4-4d1f-b88e-ddc2fcdb82f8" />
+<img width="100" height="100" alt="0217945865392069f6cd41e8514911883ec9f138006f90f876e68" src="https://github.com/user-attachments/assets/b0aac5ee-4dd4-4d1f-b88e-ddc2fcdb82f8" />
 
 
 # Ria — token-lean AI coding agent (open source)
