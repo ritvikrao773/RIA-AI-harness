@@ -1,4 +1,4 @@
-![Uploading 0217945865392069f6cd41e8514911883ec9f138006f90f876e68.png…]()
+https://github.com/ritvikrao773/RIA-AI-harness/blob/main/assets/ria-icon-256.png
 
 # Ria — token-lean AI coding agent (open source)
 
@@ -9,7 +9,7 @@ Zero runtime dependencies — a single bundled file, or a standalone `ria.exe`.
 account: you pick a provider (deepseek, qwen, glm, gpt, claude, gemini, …),
 paste *your* key, and it stays in `~/.ria/config.json` on your machine (chmod
 600). Nothing is sent anywhere except the provider you chose.
-![Uploading Screenshot 2026-11-13 212458.png…]()
+
 
 
 ## Why it's cheap on tokens
