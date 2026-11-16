@@ -188,8 +188,18 @@ Long sessions stay usable without a giant bill. Three tiers, cheapest first:
 1. **Bounded tool output** — a single tool result is capped at ~4k tokens
    (head + tail + a notice). A 100 KB file read costs ~4k, not 25k, and the
    model can re-read a narrower range if it needs more.
-2. **Free release** — when context still crosses ~72% of the model's window,
-   old tool outputs and skill bodies are replaced by short markers. No API call.
+2. **Free release** — old tool outputs, skill bodies, and **stale tool-call
+   arguments** are replaced by short markers. No API call. The arguments are
+   the biggest block in practice: a `write_file` echoes a whole file into the
+   request, and an `edit_file` carries both old and new text. Release keeps
+   the call's *intent* (`path`, `command`, `pattern`, …) and drops the bodies,
+   so a replayed call still says which file it touched.
+
+   Release is **idempotent and cache-aware**: it only rewrites history older
+   than a tail of up to 8 recent messages *and* 1,500 tokens, and a second
+   pass frees nothing. Rewriting history invalidates a provider's prompt cache
+   from that point on, so doing it once — not on every turn — is what keeps
+   the bill down.
 3. **Compaction ("compact skill")** — if that isn't enough, the older half of
    the conversation is summarised into a dense state block:
 
@@ -206,6 +216,24 @@ Context size the model actually sees is tracked by estimation, calibrated
 against the provider's reported `prompt_tokens` (clamped, so fixed per-request
 overhead can't fake a large context). `/context` shows the live figure and the
 auto-compact threshold; `/compact` does it on demand.
+
+**Saved sessions are compressed the same way.** A session is stored with old
+outputs and call arguments released (nothing new is destroyed — see below), so
+resuming costs what the live session cost instead of the full transcript.
+Nothing is lost: the first time a session is compressed, its untouched
+history is written once to `<id>.history.json.gz` beside it. Restore with:
+
+```
+gunzip <session-id>.history.json.gz > <session-id>.json
+```
+
+Measure the effect yourself — no network calls, works against your real saved
+sessions:
+
+```
+node bench/measure.mjs            # fixed per-request payload + largest session here
+node bench/measure.mjs <id> ...   # specific saved sessions
+```
 
 Env: `RIA_CONTEXT_OVERRIDE=<tokens>` forces a smaller window (testing).
 

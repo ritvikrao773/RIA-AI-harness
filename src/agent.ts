@@ -11,9 +11,21 @@ import {
   estimateHistory,
   needsCompaction,
   shrinkToolOutput,
+  trimCutoff,
 } from "./compact.js";
 
 const MAX_TURNS = 40;
+
+/**
+ * Cap on the verbatim tail kept by the *free* trim: up to this many recent
+ * messages, but never more than TAIL_TOKENS of them. Deliberately longer than
+ * the 4 messages kept by summarising compaction: a working set of a few recent
+ * calls is what the model is mid-way through, and because every trim rewrites
+ * history from that point on, a longer protected tail means fewer cache
+ * invalidations.
+ */
+const PROTECTED_TAIL = 8;
+const TAIL_TOKENS = 1_500;
 
 export const SYSTEM_PROMPT = (skills: SkillMeta[], cwdName: string) => `You are a fast, token-efficient coding agent in "${cwdName}".
 Rules:
@@ -200,7 +212,9 @@ export class Agent {
   private enforceBudget(): void {
     const BUDGET = this.opts.workingSetTokens ?? 8_000;
     if (estimateHistory(this.history) <= BUDGET) return;
-    const freed = dropBulkContext(this.history, 400);
+    const freed = dropBulkContext(this.history, 200, trimCutoff(this.history, PROTECTED_TAIL, TAIL_TOKENS));
+    // freed === 0 means every bulk block is already released. Emitting a
+    // "trim" with nothing reclaimed would imply work that did not happen.
     if (freed > 0) this.emit({ type: "status", data: { kind: "trim", reclaimed: freed } });
   }
 
@@ -215,8 +229,8 @@ export class Agent {
     const overLimit = () => needsCompaction(this.history, { contextWindow: win, threshold: this.opts.compactAt ?? 0.72 });
     if (!overLimit()) return;
 
-    // Tier 1 — free: release skill bodies and old tool outputs.
-    const freed = dropBulkContext(this.history);
+    // Tier 1 — free: release skill bodies, old tool outputs and stale call args.
+    const freed = dropBulkContext(this.history, 200, trimCutoff(this.history, PROTECTED_TAIL, TAIL_TOKENS));
     if (freed > 0) {
       this.emit({ type: "status", data: { kind: "trim", reclaimed: freed } });
       if (!overLimit()) return;

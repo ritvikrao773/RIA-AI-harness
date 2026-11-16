@@ -2,7 +2,8 @@
 import { discoverSkills, defaultSkillsDirs } from "../src/skills.js";
 import { buildTools } from "../src/tools.js";
 import { SYSTEM_PROMPT } from "../src/agent.js";
-import { estimateTokens } from "../src/llm.js";
+import { estimateTokens, type ChatMessage } from "../src/llm.js";
+import { dropBulkContext, estimateHistory, trimCutoff } from "../src/compact.js";
 import { basename } from "node:path";
 
 export function measure() {
@@ -24,4 +25,19 @@ export function measure() {
     skillLinesTokens: estimateTokens(skills.map((s) => `- ${s.name}: ${s.description}`).join("\n")),
     skillNames: skills.map((s) => `${s.name} (${s.description.length} chars desc)`),
   };
+}
+
+/**
+ * Replay a stored conversation through the free-release path and report what
+ * it would cost before and after. `secondPassFreed` must be 0 — a non-zero
+ * value means release is not idempotent and would keep invalidating caches.
+ */
+export function measureSession(messages: ChatMessage[], cutoffTail = 8) {
+  const copy = JSON.parse(JSON.stringify(messages)) as ChatMessage[];
+  const before = estimateHistory(copy);
+  const cutoff = trimCutoff(copy, cutoffTail, 1_500);
+  const freed = dropBulkContext(copy, 200, cutoff);
+  const after = estimateHistory(copy);
+  const secondPassFreed = dropBulkContext(copy, 200, trimCutoff(copy, cutoffTail, 1_500));
+  return { messages: copy.length, before, freed, after, secondPassFreed };
 }

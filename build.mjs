@@ -1,5 +1,7 @@
 import { build } from "esbuild";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+
+const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 
 mkdirSync("dist", { recursive: true });
 await build({
@@ -11,5 +13,6 @@ await build({
   outfile: "dist/cli.cjs",
   minify: true,
   sourcemap: false,
+  define: { __RIA_VERSION__: JSON.stringify(pkg.version) },
 });
 console.log("built dist/cli.cjs");

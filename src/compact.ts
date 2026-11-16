@@ -37,6 +37,63 @@ command lines, error text and identifiers — they are needed to resume.`;
 /** Markers used to recognise droppable content. */
 const SKILL_MARKER = "Skill content";
 
+/** Placeholder left where an old tool call's bulk argument used to be. */
+export const RELEASED_ARGS = "…[released — re-read the file if you need the old text]";
+
+/**
+ * Argument keys that carry the *intent* of a call and must survive release:
+ * a replayed `edit_file` must still say which file, a `bash` call which
+ * command. Everything else (file bodies, search strings) is bulk.
+ */
+const STRUCTURAL_KEYS = new Set([
+  "path", "file_path", "directory", "pattern", "include", "name",
+  "offset", "limit", "timeout_ms", "replace_all",
+]);
+
+/** Keep this many chars of a structural string (e.g. a bash command). */
+const STRUCTURAL_MAX = 200;
+
+/**
+ * Rewrite one tool call's arguments into a schema-valid stub: structural keys
+ * are kept, bulk string values are replaced by a marker. Returns the new JSON,
+ * or null when nothing would change (already released / too small / not JSON).
+ *
+ * Idempotent on purpose: re-running over an already-stubbed call changes
+ * nothing, so it cannot invalidate a provider's prompt cache repeatedly.
+ */
+export function stubToolArguments(argsJson: string, minChars = 400): string | null {
+  if (!argsJson || argsJson.length < minChars) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(argsJson);
+  } catch {
+    return null; // never corrupt a call we cannot parse
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+
+  let changed = false;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value !== "string") {
+      out[key] = value;
+      continue;
+    }
+    if (value.startsWith(RELEASED_ARGS)) {
+      out[key] = value; // already released; keep byte-identical
+      continue;
+    }
+    if (STRUCTURAL_KEYS.has(key) && value.length <= STRUCTURAL_MAX) {
+      out[key] = value;
+      continue;
+    }
+    out[key] = STRUCTURAL_KEYS.has(key)
+      ? value.slice(0, STRUCTURAL_MAX) + "…"
+      : `${RELEASED_ARGS} (${value.length} chars)`;
+    changed = true;
+  }
+  return changed ? JSON.stringify(out) : null;
+}
+
 export interface CompactOptions {
   /** Model context window in tokens. */
   contextWindow: number;
@@ -57,23 +114,64 @@ export function estimateHistory(history: ChatMessage[]): number {
 }
 
 /**
- * Tier 1: free reduction. Skill bodies and old large tool outputs are the
- * biggest, least valuable blocks — collapse them first.
+ * Index before which messages may be trimmed. The tail is protected by
+ * *both* counts: up to `maxMessages` recent messages, but never more than
+ * `maxTailTokens` of them. Message count alone is the wrong unit — one 8 KB
+ * tool result outweighs twenty small turns, and protecting eight messages
+ * would blow past a small model's whole window.
+ */
+export function trimCutoff(history: ChatMessage[], maxMessages = 8, maxTailTokens = 1_500): number {
+  let tokens = 0;
+  let i = history.length;
+  while (i > 0 && history.length - i < maxMessages) {
+    const m = history[i - 1];
+    let t = estimateTokens(m.content || "") + 4;
+    for (const tc of m.tool_calls ?? []) {
+      t += estimateTokens(tc.function.arguments) + estimateTokens(tc.function.name) + 8;
+    }
+    // Always keep the newest message, even if it alone exceeds the budget:
+    // it is the call or answer the model is working from.
+    if (i < history.length && tokens + t > maxTailTokens) break;
+    tokens += t;
+    i--;
+  }
+  return i;
+}
+
+/**
+ * Tier 1: free reduction. Skill bodies, old large tool outputs, and — the
+ * biggest win — the bulk arguments of stale tool calls (a full file body
+ * echoed into `edit_file`) are collapsed first.
+ *
+ * `cutoff` is the exclusive index before which messages may be trimmed;
+ * it defaults to "everything except the last 4". Every rewrite is
+ * idempotent, so calling this twice on the same history frees nothing the
+ * second time and a provider's prompt cache is not invalidated for free.
  * Returns tokens reclaimed.
  */
-export function dropBulkContext(history: ChatMessage[], minToolChars = 500): number {
+export function dropBulkContext(history: ChatMessage[], minToolChars = 500, cutoff?: number): number {
   const before = estimateHistory(history);
-  // Skip the last few messages: the model still needs the current step.
-  const protectedTail = 4;
-  for (let i = 0; i < history.length - protectedTail; i++) {
+  // Skip the recent tail: the model still needs the current step.
+  const stop = cutoff ?? trimCutoff(history);
+  const noun = (name?: string) => (name === "bash" ? "command output" : `${name ?? "tool"} output`);
+  for (let i = 0; i < stop; i++) {
     const m = history[i];
     if (m.role === "tool" && m.content) {
       if (m.content.startsWith(SKILL_MARKER) || m.content.length > minToolChars) {
-        m.content = `[${m.name ?? "tool"} output released to save context — re-run if needed]`;
+        m.content = `[${noun(m.name)} released to save context — re-run if needed]`;
       }
-    } else if (m.role === "assistant" && (m.content?.length || 0) > 2000 && !m.tool_calls?.length) {
-      // long narration from an earlier turn; keep the head
-      m.content = m.content!.slice(0, 600) + "\n…[truncated earlier narration]";
+    } else if (m.role === "assistant") {
+      // A call's arguments can dwarf its result: keep the file path and the
+      // command, drop the file bodies that were rewritten.
+      if (m.tool_calls?.length) {
+        for (const tc of m.tool_calls) {
+          const stub = stubToolArguments(tc.function.arguments, minToolChars);
+          if (stub) tc.function.arguments = stub;
+        }
+      } else if ((m.content?.length || 0) > 2000) {
+        // long narration from an earlier turn; keep the head
+        m.content = m.content!.slice(0, 600) + "\n…[truncated earlier narration]";
+      }
     }
   }
   return before - estimateHistory(history);

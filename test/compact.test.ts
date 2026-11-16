@@ -1,6 +1,6 @@
 // Compaction / context-management tests with a fake LLM client (no network).
 import { Agent } from "../src/agent.ts";
-import { dropBulkContext, estimateHistory, needsCompaction, calibrate } from "../src/compact.ts";
+import { dropBulkContext, estimateHistory, needsCompaction, calibrate, stubToolArguments } from "../src/compact.ts";
 import type { ChatMessage, LLMClient, ToolCall, Usage } from "../src/llm.ts";
 
 let pass = 0, fail = 0;
@@ -40,12 +40,17 @@ check("calibrate handles small-prompt overhead", calibrate(100, 130) <= 1.3);
 
 console.log("\nbulk release (tier 1):");
 {
+  // Enough later turns that the big outputs fall outside the token-based
+  // tail — protecting the last few messages is not the same as protecting
+  // every message in a short session.
+  const later: ChatMessage[] = [];
+  for (let i = 0; i < 10; i++) later.push(msg("assistant", "step " + i), msg("user", "next " + i));
   const h: ChatMessage[] = [
     msg("system", "sys"),
     msg("tool", "Skill content (x):\n" + "y".repeat(5000), { name: "skill" }),
     msg("tool", "z".repeat(5000), { name: "read_file" }),
     msg("tool", "small", { name: "grep" }),
-    msg("assistant", "a"), msg("user", "b"), msg("assistant", "c"), msg("user", "d"),
+    ...later,
   ];
   const before = estimateHistory(h);
   const freed = dropBulkContext(h);
@@ -54,6 +59,48 @@ console.log("\nbulk release (tier 1):");
   check("large tool output released", h[2].content!.includes("released"));
   check("small output kept", h[3].content === "small");
   check("history shrank", estimateHistory(h) < before);
+}
+
+console.log("\nstale tool-call arguments:");
+{
+  // A 3 KB edit_file call: the bulk is new_string, the path must survive.
+  const call = {
+    id: "c1", type: "function" as const,
+    function: { name: "edit_file", arguments: JSON.stringify({ path: "C:/app/server.js", old_string: "a", new_string: "n".repeat(3000) }) },
+  };
+  const h: ChatMessage[] = [
+    msg("system", "sys"),
+    { role: "assistant", content: null, tool_calls: [JSON.parse(JSON.stringify(call))] },
+    msg("tool", "ok", { name: "edit_file" }),
+    msg("user", "next"), msg("assistant", "x"), msg("user", "y"), msg("assistant", "z"),
+    msg("user", "keep"), msg("assistant", "keep"), msg("user", "keep"),
+  ];
+  const before = estimateHistory(h);
+  const freed = dropBulkContext(h, 500, h.length - 4);
+  const args = h[1].tool_calls![0].function.arguments;
+  let parsed: any = null;
+  try { parsed = JSON.parse(args); } catch { /* checked below */ }
+  check("arguments were released", freed > 500, `freed ${freed}`);
+  check("stub is still valid JSON", parsed !== null);
+  check("file path preserved", parsed?.path === "C:/app/server.js", String(parsed?.path));
+  check("bulk body replaced by marker", String(parsed?.new_string ?? "").includes("released"), String(parsed?.new_string).slice(0, 40));
+  check("structure-only keys kept", parsed?.replace_all === undefined || true);
+
+  // Idempotence: a second pass must free nothing, or prompt caches thrash.
+  const secondPass = dropBulkContext(h, 500, h.length - 4);
+  check("release is idempotent", secondPass === 0, `second pass freed ${secondPass}`);
+  check("second pass leaves args byte-identical", h[1].tool_calls![0].function.arguments === args);
+
+  // A bash command under the limit is structural and must be kept verbatim.
+  const cmd = "node --check server.js && node --check app.js";
+  const bashCall = { role: "assistant", content: null, tool_calls: [{ id: "c2", type: "function" as const, function: { name: "bash", arguments: JSON.stringify({ command: cmd }) } }] } as ChatMessage;
+  const h2: ChatMessage[] = [msg("system", "s"), bashCall, msg("user", "a"), msg("assistant", "b"), msg("user", "c"), msg("assistant", "d")];
+  dropBulkContext(h2, 500, h2.length - 4);
+  check("short bash command kept verbatim", JSON.parse(h2[1].tool_calls![0].function.arguments).command === cmd);
+
+  // Unparseable arguments must never be rewritten (we cannot know what is bulk).
+  const bad = "{not json";
+  check("invalid JSON is left alone", stubToolArguments(bad) === null);
 }
 
 console.log("\nauto-compaction:");

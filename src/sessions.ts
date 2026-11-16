@@ -12,8 +12,10 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import type { ChatMessage } from "./llm.js";
 import { estimateTokens } from "./llm.js";
+import { dropBulkContext, estimateHistory, trimCutoff } from "./compact.js";
 import { riaHome } from "./config.js";
 
 export interface SessionFile {
@@ -55,10 +57,32 @@ export function titleFrom(text: string): string {
   return t.length > 60 ? t.slice(0, 59) + "…" : t || "(empty)";
 }
 
+/**
+ * Compress a conversation for storage: the same release the live agent
+ * applies (old tool outputs and stale tool-call arguments → markers), but
+ * with a higher threshold so small, still-useful blocks stay.
+ *
+ * Nothing is destroyed: before the first rewrite the original history is
+ * written once beside the session as `<id>.history.json.gz`. Restore with
+ * `gunzip <file> > <id>.json`. Returns the messages to store.
+ */
+export function compressHistoryForStorage(dir: string, id: string, messages: ChatMessage[]): ChatMessage[] {
+  const copy = JSON.parse(JSON.stringify(messages)) as ChatMessage[];
+  const before = estimateHistory(copy);
+  dropBulkContext(copy, 300, trimCutoff(copy, 8, 1_500));
+  if (estimateHistory(copy) >= before) return copy; // nothing worth changing
+  const backup = join(dir, `${id}.history.json.gz`);
+  if (!existsSync(backup)) {
+    writeFileSync(backup, gzipSync(JSON.stringify({ id, savedAt: new Date().toISOString(), messages })));
+  }
+  return copy;
+}
+
 export function saveSession(s: Omit<SessionFile, "updated" | "version"> & { updated?: string }): void {
   const dir = projectDir(s.cwd);
   mkdirSync(dir, { recursive: true });
-  const file: SessionFile = { ...s, updated: s.updated ?? new Date().toISOString(), version: 1 } as SessionFile;
+  const messages = compressHistoryForStorage(dir, s.id, s.messages ?? []);
+  const file: SessionFile = { ...s, messages, updated: s.updated ?? new Date().toISOString(), version: 1 } as SessionFile;
   const tmp = join(dir, s.id + ".tmp");
   writeFileSync(tmp, JSON.stringify(file));
   renameSync(tmp, join(dir, s.id + ".json"));

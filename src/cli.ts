@@ -43,7 +43,8 @@ import { renderDoctorReport } from "./doctor.js";
 import { splitModels, findJunkModels, classifyModel, summarizeModels } from "./models.js";
 import { saveSession, newSessionId, titleFrom, listSessions, loadSession, latestSessionId, searchSessions, matchSessionId } from "./sessions.js";
 
-const VERSION = "0.1.1";
+declare const __RIA_VERSION__: string;
+const VERSION = typeof __RIA_VERSION__ === "string" ? __RIA_VERSION__ : "dev";
 const T0 = Date.now();
 
 function parseArgs(argv: string[]) {
